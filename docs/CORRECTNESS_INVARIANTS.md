@@ -108,8 +108,11 @@ The purpose is to *show* the anomalies rather than just claim immunity. The same
 | Variant | Balance write | Expected result |
 |---|---|---|
 | A. Naive read-modify-write, READ COMMITTED | `SELECT balance` (no lock) → compute in Java → `UPDATE SET balance = :new` | **Lost updates** (I3/I7a violated) and overdrafts caught only by the CHECK backstop |
+| A2. Atomic increment, unlocked check, READ COMMITTED | `SELECT balance` (no lock) for the funds check → `UPDATE SET balance = balance + :delta` | No lost updates (drift 0), but the **check-then-act race** lets overdrafts through to the CHECK backstop, which surfaces them as errors instead of clean `insufficient_funds` |
 | B. `SELECT … FOR UPDATE`, READ COMMITTED (production) | Lock, then check, then `balance = balance + :delta` | 0 anomalies |
 | C. No explicit lock, SERIALIZABLE + retry on `40001` | Same SQL as A | 0 anomalies; report the serialization-failure retry rate as the cost |
 
 Output: an anomaly count and throughput for each variant, written up in the README under "Correctness guarantees".
-Also noted: a plain atomic `SET balance = balance + :delta` *does* prevent lost updates without a lock, but not the **check-then-act** overdraft race. That is why the funds check needs the lock.
+A2 is the measured version of this point: a plain atomic `SET balance = balance + :delta` *does* prevent lost updates without a lock, but not the **check-then-act** overdraft race. That is why the funds check needs the lock.
+
+The experiment runs in its **own Postgres container**, because variant A deliberately corrupts cached balances. That corruption must never leak into the global invariant checks of the other ITs.
