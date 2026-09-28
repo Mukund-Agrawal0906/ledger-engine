@@ -14,11 +14,11 @@ Entities: [DATA_MODELS.md](DATA_MODELS.md). Invariants: [CORRECTNESS_INVARIANTS.
 
 | Method | Path | Purpose | Phase |
 |---|---|---|---|
-| `POST` | `/accounts` | Create a USER account (balance starts at 0) | 2 |
-| `GET` | `/accounts/{id}` | Account + current balance | 2 |
-| `POST` | `/transfers` | Move money (requires `Idempotency-Key`) | 2 |
-| `GET` | `/transfers/{id}` | Fetch a committed transfer | 2 |
-| `GET` | `/accounts/{id}/entries` | Statement: an account's entries, newest first, keyset-paginated | 3 |
+| `POST` | `/accounts` | Create a USER account (balance starts at 0) | 2 ✅ |
+| `GET` | `/accounts/{id}` | Account + current balance | 2 ✅ |
+| `POST` | `/transfers` | Move money (requires `Idempotency-Key`) | 2 ✅ |
+| `GET` | `/transfers/{id}` | Fetch a committed transfer | 2 ✅ |
+| `GET` | `/accounts/{id}/entries` | Statement: an account's entries, newest first, keyset-paginated | 3 ✅ |
 | `GET` | `/actuator/health` | Liveness + DB check | 0 ✅ |
 
 Funding: `POST /transfers` from the SYSTEM account for that currency (`00000000-0000-0000-0000-000000000001` = INR, `…0002` = USD).
