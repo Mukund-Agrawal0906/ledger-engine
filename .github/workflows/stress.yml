@@ -1,0 +1,27 @@
+name: Stress & isolation experiment
+
+# Manual only: 51k-transfer stress test, HTTP load test and the isolation-level experiment.
+# Run on a Linux runner for benchmark numbers without Docker Desktop's VM/network overhead.
+on:
+  workflow_dispatch:
+
+jobs:
+  stress:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: maven
+      - run: ./mvnw -B verify -Pstress
+      - name: Publish reports
+        if: always()
+        run: cat target/*-report.md >> "$GITHUB_STEP_SUMMARY" || true
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: stress-reports
+          path: target/*-report.md
