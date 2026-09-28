@@ -68,6 +68,7 @@ Retention: keys are kept forever in the MVP. A TTL sweep (e.g. 24 h, as Stripe d
 | Trigger | On | Timing | Purpose |
 |---|---|---|---|
 | `entries_balanced` | `entries` AFTER INSERT, FOR EACH ROW, `CONSTRAINT TRIGGER … DEFERRABLE INITIALLY DEFERRED` | at COMMIT | For `NEW.transaction_id`: raise `23514` unless `SUM(amount) = 0`, `COUNT(*) ≥ 2`, and `COUNT(DISTINCT accounts.currency) = 1` (**I1**) |
+| `transactions_have_entries` | `transactions` AFTER INSERT, FOR EACH ROW, `CONSTRAINT TRIGGER … DEFERRABLE INITIALLY DEFERRED` | at COMMIT | Same check for `NEW.id`. Without it, a transaction row with **zero** entries would never fire `entries_balanced` and would slip past I1 |
 | `transactions_append_only`, `entries_append_only` | BEFORE UPDATE OR DELETE, FOR EACH ROW | immediate | `RAISE EXCEPTION` (**I6**) |
 | `transactions_no_truncate`, `entries_no_truncate` | BEFORE TRUNCATE, FOR EACH STATEMENT | immediate | `RAISE EXCEPTION` (**I6**) |
 
