@@ -84,5 +84,9 @@ MSYS_NO_PATHCONV=1 docker run --rm -v "$(pwd -W):/src" -w /src -v ledger-m2:/roo
 
 - **Phase 0 (Foundation):** done — Boot app, Flyway V1 baseline, `/actuator/health` with live DB check, `HealthIT` on Testcontainers, Dockerfile + compose, CI workflow.
 - **Phase 1 (Design docs):** done — see `docs/`.
-- **Phase 2 (Vertical slice):** not started — V2 schema migration, `POST /accounts`, `POST /transfers` happy path + idempotency, invariant tests I1–I3.
+- **Phase 2 (Vertical slice):** done — V2 schema with DB backstops (I1 deferred trigger, I4 CHECK, I6 append-only triggers), `POST/GET /accounts`, `POST/GET /transfers` with idempotency, ProblemDetail error catalog, strict JSON. 45 tests (`./mvnw verify`):
+  - unit/web: `RequestHasherTest`, `LockOrderTest`, `AccountControllerTest`, `TransferControllerTest`
+  - IT: `SchemaGuardsIT` (I1/I4/I6 via raw SQL), `TransferServiceIT` (rejections have no side effects; opposing-transfer deadlock test), `IdempotencyIT` (I5 incl. 50-thread race), `LedgerInvariantsIT` (I1–I4), `TransferApiIT` (full HTTP slice), `HealthIT`
+  - Shared helpers: `LedgerITSupport` (base class), `LedgerAssertions` (global I1–I4 SQL checks, reuse in the stress test)
+  - **Lesson (mutation-checked):** the deadlock test must use ≥ 8 threads. With 2 threads a deliberately broken lock order still passed, because the threads fall into a lock-step convoy. Mutation-check new concurrency tests before trusting them.
 - **Phase 3+ (depth):** concurrency stress test (I2/I4/I5 at 50k transfers), isolation-level experiment (lost update under READ COMMITTED vs FOR UPDATE vs SERIALIZABLE), statement API, benchmarks, deploy.

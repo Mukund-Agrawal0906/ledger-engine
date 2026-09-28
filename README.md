@@ -4,7 +4,7 @@
 
 Every money movement is recorded as balanced, append-only debit/credit entries in PostgreSQL. Transfers are atomic, retries are safe (idempotency keys), and the system's core invariant — *the sum of all balances never changes* — is asserted by a stress test that fires tens of thousands of overlapping transfers.
 
-> **Status:** Phase 0 (skeleton) + Phase 1 (design) complete. Ledger features land in Phase 2.
+> **Status:** Phase 2 (vertical slice) complete: accounts, idempotent transfers, DB-enforced invariants, and 45 tests against real Postgres. Next: the 50k-transfer stress test and isolation-level experiment.
 
 ## Stack
 
@@ -25,6 +25,20 @@ The invariants this system guarantees, and the test that proves each one, are de
 ```bash
 docker compose up -d --build
 curl http://localhost:8080/actuator/health
+```
+
+Try it (amounts are minor units: `1000` = ₹10.00; money enters from the INR system account `…0001`):
+
+```bash
+# create an account → note its "id"
+curl -s -H 'Content-Type: application/json' -d '{"name":"Alice","currency":"INR"}' localhost:8080/accounts
+
+# fund it (201). Send the same request again → 200 + "Idempotent-Replayed: true", no second credit
+curl -si -H 'Content-Type: application/json' -H 'Idempotency-Key: fund-alice-1' \
+  -d '{"fromAccountId":"00000000-0000-0000-0000-000000000001","toAccountId":"<alice-id>","amount":1000,"currency":"INR"}' \
+  localhost:8080/transfers
+
+curl -s localhost:8080/accounts/<alice-id>     # "balance": 1000
 ```
 
 ## Test it
