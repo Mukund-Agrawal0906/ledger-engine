@@ -1,0 +1,20 @@
+spring:
+  application:
+    name: ledger
+  datasource:
+    # Defaults target the docker-compose Postgres published on host port 5433.
+    # Inside compose, the app overrides DB_URL to point at the `db` service.
+    url: ${DB_URL:jdbc:postgresql://localhost:5433/ledger}
+    username: ${DB_USER:ledger}
+    password: ${DB_PASSWORD:ledger}
+  flyway:
+    locations: classpath:db/migration
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health
+  endpoint:
+    health:
+      show-details: always
