@@ -130,7 +130,8 @@ record Account(UUID id, String name, AccountKind kind, Currency currency,
 record Entry(long id, UUID transactionId, UUID accountId, long amount) {}
 
 record Transfer(UUID id, UUID fromAccountId, UUID toAccountId, long amount,
-                Currency currency, String description, Instant createdAt) {}  // derived from a transaction + its 2 entries
+                Currency currency, String description, Instant createdAt,
+                List<Entry> entries) {}                                    // derived from a transaction + its 2 entries
 
 record TransferCommand(String idempotencyKey, UUID fromAccountId, UUID toAccountId,
                        long amount, Currency currency, String description) {}   // service input, already validated for shape
