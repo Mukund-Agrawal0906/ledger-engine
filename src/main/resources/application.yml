@@ -7,6 +7,10 @@ spring:
     url: ${DB_URL:jdbc:postgresql://localhost:5433/ledger}
     username: ${DB_USER:ledger}
     password: ${DB_PASSWORD:ledger}
+    hikari:
+      maximum-pool-size: 20
+      # Bound every wait on a row / unique-index lock; 55P03 maps to 503 service_busy (docs/LLD.md §2).
+      connection-init-sql: SET lock_timeout = '5s'
   flyway:
     locations: classpath:db/migration
 

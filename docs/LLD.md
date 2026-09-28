@@ -16,10 +16,10 @@ service/
   RequestHasher            canonical SHA-256 of a TransferCommand (§5)
   LockOrder                the single comparator for account lock ordering (§4)
 repository/
-  AccountRepository        accounts + account_balances inserts; read model Account
+  AccountRepository        insertUserAccount (accounts + account_balances), findById → read model Account
   BalanceRepository        lockForUpdate(ids), applyDelta(id, delta)
-  LedgerRepository         insertTransaction, insertEntries, findTransfer(txId)
-  IdempotencyRepository    tryInsert(key, hash, txId) -> boolean, find(key)
+  LedgerRepository         insertTransaction, insertTransferEntries, findTransfer(txId)
+  IdempotencyRepository    tryClaim(key, hash, txId) -> boolean, find(key)
 domain/
   Account, AccountKind, Currency, Entry, Transfer, TransferCommand   (records/enums, see DATA_MODELS §6)
 error/
