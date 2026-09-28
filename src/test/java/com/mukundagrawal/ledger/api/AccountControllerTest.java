@@ -11,6 +11,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import java.time.Instant;
+import java.util.List;
 import java.util.UUID;
 
 import org.junit.jupiter.api.Test;
@@ -24,6 +25,8 @@ import org.springframework.test.web.servlet.MockMvc;
 import com.mukundagrawal.ledger.domain.Account;
 import com.mukundagrawal.ledger.domain.AccountKind;
 import com.mukundagrawal.ledger.domain.Currency;
+import com.mukundagrawal.ledger.domain.Statement;
+import com.mukundagrawal.ledger.domain.StatementLine;
 import com.mukundagrawal.ledger.error.AccountNotFoundException;
 import com.mukundagrawal.ledger.service.AccountService;
 
@@ -89,6 +92,28 @@ class AccountControllerTest {
 			.andExpect(content().contentType(MediaType.APPLICATION_PROBLEM_JSON))
 			.andExpect(jsonPath("$.code").value("account_not_found"))
 			.andExpect(jsonPath("$.type").value("https://ledger-engine.dev/problems/account-not-found"));
+	}
+
+	@Test
+	void statementReturnsItemsAndCursor() throws Exception {
+		var line = new StatementLine(41, UUID.randomUUID(), -300, Instant.parse("2026-09-28T10:16:02Z"), "rent");
+		given(accounts.getStatement(ID, 42L, 1)).willReturn(new Statement(List.of(line), 41L));
+
+		mvc.perform(get("/accounts/" + ID + "/entries?limit=1&before=42"))
+			.andExpect(status().isOk())
+			.andExpect(jsonPath("$.items[0].entryId").value(41))
+			.andExpect(jsonPath("$.items[0].amount").value(-300))
+			.andExpect(jsonPath("$.items[0].description").value("rent"))
+			.andExpect(jsonPath("$.nextCursor").value(41));
+	}
+
+	@Test
+	void statementLimitIsBounded() throws Exception {
+		for (String query : new String[] { "limit=0", "limit=201", "before=0", "limit=abc" }) {
+			mvc.perform(get("/accounts/" + ID + "/entries?" + query))
+				.andExpect(status().isBadRequest())
+				.andExpect(jsonPath("$.code").value("validation_failed"));
+		}
 	}
 
 	@Test

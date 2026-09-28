@@ -66,15 +66,20 @@ public class ApiExceptionHandler extends ResponseEntityExceptionHandler {
 		return ResponseEntity.badRequest().body(body);
 	}
 
-	/** Tags Spring MVC's built-in 400s (unreadable/unknown-field JSON, bad UUIDs, ...) as validation_failed. */
+	/**
+	 * Tags Spring MVC's built-in 400s (unreadable/unknown-field JSON, bad UUIDs, method-validation failures
+	 * on query params, ...) as validation_failed. Done on the super result: for some exceptions (e.g.
+	 * HandlerMethodValidationException) {@code body} arrives null and the ProblemDetail is only built there.
+	 */
 	@Override
 	protected ResponseEntity<Object> handleExceptionInternal(Exception e, Object body, HttpHeaders headers,
 			HttpStatusCode status, WebRequest request) {
-		if (status.value() == 400 && body instanceof ProblemDetail pd) {
+		ResponseEntity<Object> response = super.handleExceptionInternal(e, body, headers, status, request);
+		if (response != null && response.getStatusCode().value() == 400 && response.getBody() instanceof ProblemDetail pd) {
 			pd.setType(type("validation_failed"));
 			pd.setProperty("code", "validation_failed");
 		}
-		return super.handleExceptionInternal(e, body, headers, status, request);
+		return response;
 	}
 
 	private ResponseEntity<ProblemDetail> internalError(Exception e) {

@@ -11,6 +11,7 @@ import org.springframework.stereotype.Repository;
 
 import com.mukundagrawal.ledger.domain.Currency;
 import com.mukundagrawal.ledger.domain.Entry;
+import com.mukundagrawal.ledger.domain.StatementLine;
 import com.mukundagrawal.ledger.domain.Transfer;
 
 /** The append-only log: {@code transactions} + {@code entries}. INSERT and SELECT only (I6). */
@@ -40,6 +41,28 @@ public class LedgerRepository {
 			.param("to", to)
 			.param("amount", amount)
 			.update();
+	}
+
+	/**
+	 * Keyset page of an account's entries, newest first: {@code id < before} on the {@code (account_id, id)}
+	 * index, so page N costs the same as page 1 (unlike OFFSET).
+	 */
+	public List<StatementLine> findEntries(UUID accountId, Long before, int limit) {
+		return jdbc.sql("""
+				SELECT e.id, e.transaction_id, e.amount, t.created_at, t.description
+				  FROM entries e
+				  JOIN transactions t ON t.id = e.transaction_id
+				 WHERE e.account_id = :account
+				   AND e.id < COALESCE(CAST(:before AS BIGINT), 9223372036854775807)
+				 ORDER BY e.id DESC
+				 LIMIT :limit""")
+			.param("account", accountId)
+			.param("before", before)
+			.param("limit", limit)
+			.query((rs, n) -> new StatementLine(rs.getLong("id"), rs.getObject("transaction_id", UUID.class),
+					rs.getLong("amount"), rs.getObject("created_at", OffsetDateTime.class).toInstant(),
+					rs.getString("description")))
+			.list();
 	}
 
 	/** Rebuilds a transfer from its transaction row and entries (debit first, then credit). */
