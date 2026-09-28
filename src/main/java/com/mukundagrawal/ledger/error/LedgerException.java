@@ -9,7 +9,7 @@ import org.springframework.http.HttpStatus;
  */
 public abstract sealed class LedgerException extends RuntimeException
 		permits AccountNotFoundException, TransferNotFoundException, SameAccountException, CurrencyMismatchException,
-		InsufficientFundsException, IdempotencyKeyReusedException {
+		InsufficientFundsException, IdempotencyKeyReusedException, InvalidIdempotencyKeyException {
 
 	private final String code;
 

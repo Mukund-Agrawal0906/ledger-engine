@@ -8,6 +8,7 @@ Companion to [HLD.md](HLD.md). Schema: [DATA_MODELS.md](DATA_MODELS.md). HTTP sh
 api/
   AccountController        POST /accounts, GET /accounts/{id}
   TransferController       POST /transfers, GET /transfers/{id}
+  JsonStrictnessConfig     Jackson 3 strictness (§6)
   dto/                     CreateAccountRequest, AccountResponse, CreateTransferRequest, TransferResponse, EntryResponse
 service/
   AccountService           createAccount, getAccount
@@ -25,7 +26,8 @@ domain/
 error/
   LedgerException          sealed base: carries `code` + HTTP status
   AccountNotFoundException, TransferNotFoundException, SameAccountException,
-  CurrencyMismatchException, InsufficientFundsException, IdempotencyKeyReusedException
+  CurrencyMismatchException, InsufficientFundsException, IdempotencyKeyReusedException,
+  InvalidIdempotencyKeyException (missing_idempotency_key)
   ApiExceptionHandler      @RestControllerAdvice → ProblemDetail (§6); also maps lock timeouts (55P03) → service_busy
 ```
 
@@ -100,7 +102,7 @@ This is why the idempotency row is written **inside** the same DB transaction as
 | `DataAccessException` whose root `SQLException.getSQLState()` is `55P03` (lock timeout) | `service_busy` / 503 + `Retry-After: 1` |
 | Anything else, including `40P01` and trigger/CHECK violations at commit | `internal_error` / 500, logged at ERROR with the transfer id. These represent bugs, and the invariant tests exist to catch them |
 
-Jackson strictness (Spring Boot 4 / Jackson 3): fail on unknown properties, fail on floats coerced to integer, no scalar coercion (`"100"` is not accepted as `100`). All of this is set in `application.yml`/a `JsonMapperBuilderCustomizer` and covered by a controller test.
+Jackson strictness (Spring Boot 4 / Jackson 3): fail on unknown properties, fail on floats coerced to integer, no scalar coercion (`"100"` is not accepted as `100`). All of this is set in `api/JsonStrictnessConfig` (a `JsonMapperBuilderCustomizer`; Jackson 3 coercion config for `LogicalType.Integer`) and covered by a controller test.
 
 ## 7. Account creation — `AccountService.createAccount(name, currency)`
 
