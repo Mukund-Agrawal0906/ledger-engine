@@ -1,5 +1,7 @@
 # Ledger Engine
 
+[![CI](https://github.com/Mukund-Agrawal0906/ledger-engine/actions/workflows/ci.yml/badge.svg)](https://github.com/Mukund-Agrawal0906/ledger-engine/actions/workflows/ci.yml) [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+
 **A financial ledger that never loses a cent:** ACID double-entry accounting, idempotent transfers, and correctness you can check under heavy concurrent load.
 
 Every money movement is recorded as balanced, append-only debit/credit entries in PostgreSQL. Transfers are atomic, retries are safe (idempotency keys), and the system's core invariant — *the sum of all balances never changes* — is asserted by a stress test that fires tens of thousands of overlapping transfers.
