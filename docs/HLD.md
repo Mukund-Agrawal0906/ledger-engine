@@ -106,6 +106,7 @@ Step-by-step detail, including every failure branch, is in [LLD.md](LLD.md) §3.
 | Two identical requests race | One commits; the other blocks on the key, then replays (I5) |
 | Hot account contention | Requests queue on the row lock. `lock_timeout` (5 s) bounds the wait and maps to `503 service_busy` so clients back off instead of piling up |
 | Bug writes an unbalanced or overdrawing transaction | Rejected by DB triggers/constraints at commit; surfaces as a 500 and a failing invariant test, never as silent corruption |
+| Someone bypasses the app (manual SQL, bad migration, partial restore) | The scheduled reconciliation job detects cache/log drift (I3) and non-conservation (I2); `/actuator/health` → `ledger: DOWN` with the offending rows ([LLD.md](LLD.md) §9) |
 
 ## 8. Non-goals (MVP)
 

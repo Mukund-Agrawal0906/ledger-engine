@@ -116,7 +116,16 @@ One `READ COMMITTED` transaction: `INSERT INTO accounts(name, kind, currency) VA
 | `spring.datasource.hikari.connection-init-sql` | `SET lock_timeout = '5s'` | Bounded waits (§2) |
 | `spring.jackson.*` strictness flags | see §6 | Reject ambiguous input |
 
-## 9. Test strategy
+## 9. Reconciliation (Phase 4)
+
+`service/ReconciliationService` re-runs the I1–I4 queries over the whole database on a schedule (`ledger.reconciliation.interval`, default `PT5M`, after a `PT30S` initial delay; `ledger.reconciliation.enabled=false` turns it off). Each invariant yields up to 20 sample offending rows.
+
+- **Why, if the DB constraints already prevent violations?** Constraints only guard writes that go *through* them. A manual `UPDATE` on `account_balances`, a bad migration, or a partial restore can still desynchronise the cache from the log (I3) or break conservation (I2). Reconciliation is the detector for exactly that.
+- **One copy of the SQL:** the test helper `LedgerAssertions` delegates to this service, so the queries that prove the invariants in tests are the queries that watch them in production.
+- **Health:** `health/LedgerHealthIndicator` exposes the *last* report as the `ledger` component of `/actuator/health`: `UNKNOWN` before the first run, `UP` with `lastRun`/`durationMs`, or `DOWN` with the samples. It never runs the full-scan queries on a health poll, and it's deliberately **not** in the liveness group: a data-integrity alarm needs a human, and restarting the app wouldn't fix it.
+- **Testing:** `ReconciliationIT` corrupts a cached balance inside a transaction, calls `check()` (which has no `@Transactional` of its own, so it joins that transaction and sees the uncommitted corruption), asserts that both I3 and I2 flag it, and rolls back.
+
+## 10. Test strategy
 
 | Layer | Type | Examples |
 |---|---|---|
