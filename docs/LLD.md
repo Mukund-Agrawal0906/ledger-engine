@@ -18,8 +18,8 @@ service/
   LockOrder                the single comparator for account lock ordering (§4)
 repository/
   AccountRepository        insertUserAccount (accounts + account_balances), findById → read model Account
-  BalanceRepository        lockForUpdate(ids), applyDelta(id, delta)
-  LedgerRepository         insertTransaction, insertTransferEntries, findTransfer(txId)
+  BalanceRepository        lockBoth(a, b) (one ordered FOR UPDATE), applyTransfer(from, to, amount)
+  LedgerRepository         appendTransfer (one CTE), findTransfer(txId), findEntries; insertTransaction/insertTransferEntries (experiment only)
   IdempotencyRepository    tryClaim(key, hash, txId) -> boolean, find(key)
 domain/
   Account, AccountKind, Currency, Entry, Transfer, TransferCommand   (records/enums, see DATA_MODELS §6)
@@ -51,12 +51,11 @@ Inside one `READ COMMITTED` transaction:
 |---|---|---|---|
 | 1 | Generate ids | — | `txId = UUID.randomUUID()`; `hash = RequestHasher.hash(cmd)` |
 | 2 | **Claim the key** | `INSERT INTO idempotency_keys(key, request_hash, transaction_id) VALUES (…) ON CONFLICT (key) DO NOTHING` | 1 row → new request, continue to 3. 0 rows → go to **R** (replay). May **block** here while another in-flight transaction holds the same key (§5) |
-| 3 | **Lock balances** in `LockOrder` | for each id, in order: `SELECT b.account_id, b.balance, b.allow_negative, a.currency FROM account_balances b JOIN accounts a ON a.id = b.account_id WHERE b.account_id = :id FOR UPDATE OF b` | Row missing → `AccountNotFoundException` (rollback also releases the key claim) |
+| 3 | **Lock both balances**, one statement | `SELECT b.account_id, b.balance, b.allow_negative, a.currency FROM account_balances b JOIN accounts a ON a.id = b.account_id WHERE b.account_id IN (:from, :to) ORDER BY b.account_id FOR UPDATE OF b` | A row missing from the result → `AccountNotFoundException` (the rollback also releases the key claim) |
 | 4 | Currency check | — | `cmd.currency ≠ from.currency` or `≠ to.currency` → `CurrencyMismatchException` |
 | 5 | Funds check (reads the **locked** row) | — | `!from.allowNegative && from.balance < amount` → `InsufficientFundsException` |
-| 6 | Write the log | `INSERT INTO transactions(id, kind, description) VALUES (:txId, 'TRANSFER', :desc)`; `INSERT INTO entries(transaction_id, account_id, amount) VALUES (:txId, :from, -:amt), (:txId, :to, +:amt)` | |
-| 7 | Update the cache | `UPDATE account_balances SET balance = balance + :delta, version = version + 1, updated_at = now() WHERE account_id = :id` for each account (`-amt` for from, `+amt` for to), in lock order | Exactly 1 row updated each time; anything else is a bug and throws `IllegalStateException` |
-| 8 | Read back | `LedgerRepository.findTransfer(txId)` | Returns `TransferResult(transfer, replayed = false)` |
+| 6 | Write the log, one statement | Data-modifying CTE: `WITH t AS (INSERT INTO transactions … RETURNING id, created_at), e AS (INSERT INTO entries … SELECT … FROM t, (VALUES (:from, -:amt, 1), (:to, +:amt, 2)) … RETURNING id, account_id, amount) SELECT …` | Returns `created_at` + both entry ids, so the `Transfer` is built from data in hand (no read-back query) |
+| 7 | Update the cache, one statement | `UPDATE account_balances b SET balance = b.balance + v.delta, version = b.version + 1, updated_at = now() FROM (VALUES (:from, -:amt), (:to, +:amt)) v(account_id, delta) WHERE b.account_id = v.account_id` | Exactly 2 rows updated; anything else is a bug and throws `IllegalStateException` |
 | 9 | COMMIT | — | Deferred checks run: the `entries_balanced` trigger (I1) and the deferred FK `idempotency_keys → transactions`. Failure here = bug → 500 |
 
 **R — Replay branch** (step 2 inserted 0 rows):
@@ -68,10 +67,19 @@ Why the key claim is step 2, *before* the balance locks: it gives every transfer
 
 ## 4. Locking & deadlock avoidance
 
-- Both balance rows are locked with **separate** `SELECT … FOR UPDATE OF b` statements, issued in `LockOrder` order. `OF b` locks only the balance row, never the `accounts` metadata row, so `GET /accounts/{id}` metadata reads are never blocked. (Plain SELECTs don't block on row locks in Postgres anyway, thanks to MVCC.)
+- Both balance rows are locked by **one** `SELECT … WHERE account_id IN (…) ORDER BY account_id FOR UPDATE OF b`. Postgres takes row locks in `ORDER BY` order, because the LockRows plan node sits *above* the Sort. So every transfer acquires its locks in ascending `uuid` order, the same global order as `LockOrder`. (Phase 2 issued two single-row `FOR UPDATE` statements in `LockOrder` order. Phase 4 merged them to cut round trips while locks are held; see §4a.) `OF b` locks only the balance row, never the `accounts` metadata row, so `GET /accounts/{id}` metadata reads are never blocked. (Plain SELECTs don't block on row locks in Postgres anyway, thanks to MVCC.)
 - `LockOrder` compares `UUID.toString()` lexicographically. This matches Postgres's `uuid` ordering (unsigned byte order). **Pitfall avoided:** Java's `UUID.compareTo` compares the two halves as *signed* longs, which disagrees with Postgres for ids whose high bit is set. That is harmless as long as all locking goes through Java, but it would deadlock against any future SQL path that locks with `ORDER BY account_id FOR UPDATE` (e.g. a batch reconciliation job). One comparator, matching the DB, used everywhere.
 - Why this prevents deadlock: every transaction acquires balance locks in one global total order, so the wait-for graph can't contain a cycle. Any `40P01` is therefore a bug. It is **not** retried: it's logged at ERROR and returned as 500, and the stress test asserts the count is 0 (I7b).
 - Lock hold time is minimised: no network calls, logging I/O, or hashing happen between step 3 and COMMIT. The hash is computed in step 1.
+
+### 4a. Round trips while locks are held (Phase 4 optimisation)
+
+| | Statements between taking the first row lock and COMMIT |
+|---|---|
+| Phase 2–3 | lock A, lock B, insert transaction, insert entries, update A, update B, read back transfer (**7**) |
+| Phase 4 | lock A+B, append transaction + entries, update A+B (**3**) |
+
+Under contention, throughput on a hot row is roughly 1 / (lock hold time), and hold time is dominated by network round trips, so fewer statements while locked means directly more throughput. The measured before/after is in the README. The deadlock test was mutation-checked against the merged statement: ordering it source-first (`ORDER BY (account_id = :from) DESC`) reintroduces deadlocks.
 
 ## 5. Idempotency
 

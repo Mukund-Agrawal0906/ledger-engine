@@ -24,6 +24,47 @@ public class LedgerRepository {
 		this.jdbc = jdbc;
 	}
 
+	/**
+	 * Appends a whole transfer — the transaction row and its debit + credit entries — in ONE statement
+	 * (data-modifying CTEs), and returns it, so the hot path needs no separate read-back while locks are
+	 * held. The entries' FK to {@code transactions} is checked at end of statement, after both inserts; the
+	 * I1 balance trigger still runs at COMMIT.
+	 */
+	public Transfer appendTransfer(UUID transactionId, UUID from, UUID to, long amount, Currency currency,
+			String description) {
+		record Row(Instant createdAt, long entryId, UUID accountId, long amount) {
+		}
+		List<Row> rows = jdbc.sql("""
+				WITH t AS (
+				    INSERT INTO transactions (id, kind, description)
+				    VALUES (:tx, 'TRANSFER', :description)
+				    RETURNING id, created_at
+				), e AS (
+				    INSERT INTO entries (transaction_id, account_id, amount)
+				    SELECT t.id, v.account_id, v.amount
+				      FROM t, (VALUES (CAST(:from AS uuid), -CAST(:amount AS BIGINT), 1),
+				                      (CAST(:to AS uuid), CAST(:amount AS BIGINT), 2)) AS v(account_id, amount, ord)
+				     ORDER BY v.ord
+				    RETURNING id, account_id, amount
+				)
+				SELECT (SELECT created_at FROM t) AS created_at, e.id, e.account_id, e.amount
+				  FROM e
+				 ORDER BY e.id""")
+			.param("tx", transactionId)
+			.param("description", description)
+			.param("from", from)
+			.param("to", to)
+			.param("amount", amount)
+			.query((rs, n) -> new Row(rs.getObject("created_at", OffsetDateTime.class).toInstant(), rs.getLong("id"),
+					rs.getObject("account_id", UUID.class), rs.getLong("amount")))
+			.list();
+		if (rows.size() != 2) {
+			throw new IllegalStateException("Expected 2 entries for transaction " + transactionId + ", got " + rows);
+		}
+		List<Entry> entries = rows.stream().map(r -> new Entry(r.entryId(), transactionId, r.accountId(), r.amount())).toList();
+		return new Transfer(transactionId, from, to, amount, currency, description, rows.getFirst().createdAt(), entries);
+	}
+
 	public void insertTransaction(UUID transactionId, String description) {
 		jdbc.sql("INSERT INTO transactions (id, kind, description) VALUES (:id, 'TRANSFER', :description)")
 			.param("id", transactionId)

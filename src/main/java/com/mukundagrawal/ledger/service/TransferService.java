@@ -1,8 +1,6 @@
 package com.mukundagrawal.ledger.service;
 
 import java.security.MessageDigest;
-import java.util.HashMap;
-import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
@@ -64,14 +62,14 @@ public class TransferService {
 			return replay(cmd.idempotencyKey(), requestHash);
 		}
 
-		// 3. Lock both balance rows in the one global order (deadlock avoidance, LLD §4).
-		List<UUID> lockOrder = LockOrder.sorted(from, to);
-		Map<UUID, LockedBalance> locked = new HashMap<>();
-		for (UUID id : lockOrder) {
-			locked.put(id, balances.lockForUpdate(id).orElseThrow(() -> new AccountNotFoundException(id)));
-		}
+		// 3. Lock both balance rows in ONE statement, in the one global order (deadlock avoidance, LLD §4).
+		//    From here to COMMIT, locks are held: steps 3, 6 and 7 are one round trip each, nothing else touches the DB.
+		Map<UUID, LockedBalance> locked = balances.lockBoth(from, to);
 		LockedBalance source = locked.get(from);
 		LockedBalance destination = locked.get(to);
+		if (source == null || destination == null) {
+			throw new AccountNotFoundException(source == null ? from : to);
+		}
 
 		// 4. Currency must match on both sides; there is no FX.
 		if (source.currency() != cmd.currency() || destination.currency() != cmd.currency()) {
@@ -83,17 +81,15 @@ public class TransferService {
 			throw new InsufficientFundsException(from, source.balance(), amount);
 		}
 
-		// 6. Append to the log.
-		ledger.insertTransaction(txId, cmd.description());
-		ledger.insertTransferEntries(txId, from, to, amount);
+		// 6. Append transaction + both entries to the log (one statement); it returns the committed-to-be transfer,
+		//    so no read-back round trip (the old step 8) is needed.
+		Transfer transfer = ledger.appendTransfer(txId, from, to, amount, cmd.currency(), cmd.description());
 
-		// 7. Update the balance cache in the same transaction (I3), in lock order.
-		for (UUID id : lockOrder) {
-			balances.applyDelta(id, id.equals(from) ? -amount : amount);
-		}
+		// 7. Update both cached balances in the same transaction (I3), one statement.
+		balances.applyTransfer(from, to, amount);
 
-		// 8. Read back. 9. COMMIT happens when this method returns; deferred I1 checks run then.
-		return new TransferResult(ledger.findTransfer(txId).orElseThrow(), false);
+		// 9. COMMIT happens when this method returns; deferred I1 checks run then.
+		return new TransferResult(transfer, false);
 	}
 
 	@Transactional(readOnly = true)
